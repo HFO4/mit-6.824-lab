@@ -15,7 +15,7 @@ type RequestTaskArgs struct {
 }
 
 type RequestTaskReply struct {
-	Task Task
+	Task *Task
 }
 
 // Add your RPC definitions here.

@@ -9,28 +9,19 @@ import (
 )
 
 type Master struct {
-	// Your definitions here.
+	// Tasks wait to be done
+	UndoTasks chan *Task
 
-}
-
-// TaskType type of tasks
-type TaskType int
-
-const (
-	MapTask = iota
-	ReduceTask
-)
-
-// Task for workers
-type Task struct {
-	Type TaskType
+	// Locks
 }
 
 // Your code here -- RPC handlers for the worker to call.
 
 // RequestTask request for a new task
 func (m *Master) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply) error {
-	reply.Task = Task{}
+	task := <-m.UndoTasks
+	task.Update()
+	reply.Task = task
 	return nil
 }
 
@@ -68,9 +59,19 @@ func (m *Master) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{}
+	m := Master{
+		UndoTasks: make(chan *Task, len(files)),
+	}
 
-	// Your code here.
+	// Fill init tasks
+	for _, file := range files {
+		newTask := &Task{
+			Type:  MapTask,
+			Input: []string{file},
+		}
+		newTask.Update()
+		m.UndoTasks <- newTask
+	}
 
 	m.server()
 	return &m

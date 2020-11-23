@@ -55,7 +55,7 @@ func CallExample() {
 	call("Master.RequestTask", &args, &reply)
 
 	// reply.Y should be 100.
-	fmt.Println(reply)
+	fmt.Println(reply.Task.Input)
 }
 
 //
