@@ -28,16 +28,6 @@ type Task struct {
 
 // Your code here -- RPC handlers for the worker to call.
 
-//
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
-
 // RequestTask request for a new task
 func (m *Master) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply) error {
 	reply.Task = Task{}
