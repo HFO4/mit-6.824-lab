@@ -23,6 +23,9 @@ type Task struct {
 
 	// Locks
 	modifyLock sync.Mutex
+
+	// Timeout timer
+	timer *time.Timer
 }
 
 // Update the last update time

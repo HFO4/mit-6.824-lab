@@ -39,12 +39,15 @@ func Worker(mapf func(string, string) []KeyValue,
 	for {
 		if task, alive := PullTask(); alive {
 			fmt.Println("NewTask:", task.Input)
-			err := ProcessTask(task, mapf, reducef)
+			res, err := ProcessTask(task, mapf, reducef)
 			if err != nil {
 				fmt.Println("Failed task:", err)
 				// Skip failed task
 				continue
 			}
+
+			// Notify master task complete
+			call("Master.TaskDone", res, nil)
 		} else {
 			fmt.Println("Worker quit")
 			return
@@ -55,7 +58,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 // ProcessTask process a task
 func ProcessTask(task *Task, mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) (err error) {
+	reducef func(string, []string) string) (reply *NotifyTaskDoneArgs, err error) {
 	// Handle panics
 	defer func() {
 		if panicErr := recover(); panicErr != nil {
@@ -68,13 +71,11 @@ func ProcessTask(task *Task, mapf func(string, string) []KeyValue,
 	case MapTask:
 		return processMapTask(task, mapf)
 	default:
-		return errors.New("Unknown task type")
+		return nil, errors.New("Unknown task type")
 	}
-
-	return nil
 }
 
-func processMapTask(task *Task, mapf func(string, string) []KeyValue) error {
+func processMapTask(task *Task, mapf func(string, string) []KeyValue) (*NotifyTaskDoneArgs, error) {
 	// init in-memory intermediate store
 	intermediate := make([][]KeyValue, task.NReduce)
 	for i := 0; i < task.NReduce; i++ {
@@ -89,12 +90,12 @@ func processMapTask(task *Task, mapf func(string, string) []KeyValue) error {
 	for _, filename := range task.Input {
 		file, err := os.Open(filename)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		content, err := ioutil.ReadAll(file)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		file.Close()
@@ -106,19 +107,26 @@ func processMapTask(task *Task, mapf func(string, string) []KeyValue) error {
 		}
 	}
 
+	reply := &NotifyTaskDoneArgs{
+		Output: make([]string, task.NReduce),
+		Task:   *task,
+	}
+
 	// Stroe intermediate values to disk
 	for i := 0; i < task.NReduce; i++ {
 		str, err := json.Marshal(intermediate[i])
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		if err := ioutil.WriteFile(fmt.Sprintf("intermediate/mr-%d-%d", task.ID, i), str, 0777); err != nil {
-			return err
+		outputPath := fmt.Sprintf("intermediate/mr-%d-%d", task.ID, i)
+		if err := ioutil.WriteFile(outputPath, str, 0777); err != nil {
+			return nil, err
 		}
+		reply.Output[i] = outputPath
 	}
 
-	return nil
+	return reply, nil
 }
 
 // PullTask pull a new task from master
