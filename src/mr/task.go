@@ -15,9 +15,11 @@ const (
 
 // Task for workers
 type Task struct {
+	ID         int
 	Type       TaskType
 	Input      []string
 	LastUpsate time.Time
+	NReduce    int
 
 	// Locks
 	modifyLock sync.Mutex

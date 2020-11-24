@@ -60,14 +60,16 @@ func (m *Master) Done() bool {
 //
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
-		UndoTasks: make(chan *Task, len(files)),
+		UndoTasks: make(chan *Task, len(files)+nReduce),
 	}
 
 	// Fill init tasks
-	for _, file := range files {
+	for index, file := range files {
 		newTask := &Task{
-			Type:  MapTask,
-			Input: []string{file},
+			ID:      index,
+			Type:    MapTask,
+			Input:   []string{file},
+			NReduce: nReduce,
 		}
 		newTask.Update()
 		m.UndoTasks <- newTask
