@@ -17,9 +17,11 @@ type Master struct {
 	// Tasks who are being processed
 	DoingTasks map[int]*Task
 	// ID counter for new tasks
-	IDCounter       int
-	RemainedMapTask int
-	MapOutput       [][]string
+	IDCounter          int
+	RemainedMapTask    int
+	RemainedReduceTask int
+	MapOutput          [][]string
+	nReduce            int
 
 	// Locks
 	idCounterLock sync.Mutex
@@ -31,7 +33,6 @@ type Master struct {
 // RequestTask request for a new task
 func (m *Master) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply) error {
 	task := <-m.UndoTasks
-	task.Update()
 	task.timer = time.AfterFunc(time.Second*10, func() {
 		m.handleTimeout(task)
 	})
@@ -50,16 +51,36 @@ func (m *Master) TaskDone(args *NotifyTaskDoneArgs, reply *NotifyTaskDoneReply) 
 		task.timer.Stop()
 		delete(m.DoingTasks, args.Task.ID)
 		if task.Type == MapTask {
-			m.RemainedMapTask--
-			m.MapOutput[task.ID] = args.Output
+			if m.MapOutput[task.ID] == nil {
+				m.RemainedMapTask--
+				m.MapOutput[task.ID] = args.Output
+			}
+			if m.RemainedMapTask == 0 {
+				// Start issuing reduce tasks
+				fmt.Println("Start reduce")
+				for i := 0; i < m.nReduce; i++ {
+					input := make([]string, 0)
+					for j := 0; j < len(m.MapOutput); j++ {
+						input = append(input, m.MapOutput[j][i])
+					}
+					m.idCounterLock.Lock()
+					newTask := &Task{
+						ID:       m.IDCounter,
+						Type:     ReduceTask,
+						Input:    input,
+						NReduce:  m.nReduce,
+						ReduceID: i,
+					}
+					m.IDCounter++
+					m.idCounterLock.Unlock()
+					m.UndoTasks <- newTask
+				}
+			}
 		} else {
-
+			if err := os.Rename(args.Output[0], fmt.Sprintf("mr-out-%d", task.ReduceID)); err == nil {
+				m.RemainedReduceTask--
+			}
 		}
-	}
-	if m.RemainedMapTask == 0 {
-		// Start issuing reduce tasks
-		fmt.Println("Start reduce")
-		fmt.Println(m.MapOutput)
 	}
 	m.doingTaskLock.Unlock()
 	return nil
@@ -88,14 +109,14 @@ func (m *Master) server() {
 func (m *Master) Done() bool {
 	ret := false
 
-	// Your code here.
-
+	m.doingTaskLock.Lock()
+	ret = m.RemainedReduceTask == 0
+	m.doingTaskLock.Unlock()
 	return ret
 }
 
 // HandleTimeout handles timeout event of a task
 func (m *Master) handleTimeout(task *Task) {
-	task.Update()
 	m.UndoTasks <- task
 	fmt.Println("Timeout event triggered")
 }
@@ -107,10 +128,12 @@ func (m *Master) handleTimeout(task *Task) {
 //
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
-		UndoTasks:       make(chan *Task, len(files)+nReduce),
-		DoingTasks:      make(map[int]*Task),
-		RemainedMapTask: len(files),
-		MapOutput:       make([][]string, len(files)),
+		nReduce:            nReduce,
+		UndoTasks:          make(chan *Task, len(files)+nReduce),
+		DoingTasks:         make(map[int]*Task),
+		RemainedMapTask:    len(files),
+		RemainedReduceTask: nReduce,
+		MapOutput:          make([][]string, len(files)),
 	}
 
 	m.server()
@@ -128,7 +151,6 @@ func MakeMaster(files []string, nReduce int) *Master {
 		}
 		m.IDCounter++
 		m.idCounterLock.Unlock()
-		newTask.Update()
 		m.UndoTasks <- newTask
 	}
 

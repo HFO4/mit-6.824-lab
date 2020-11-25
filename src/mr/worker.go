@@ -9,6 +9,9 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
+
+	"github.com/google/uuid"
 )
 
 //
@@ -18,6 +21,14 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -70,9 +81,62 @@ func ProcessTask(task *Task, mapf func(string, string) []KeyValue,
 	switch task.Type {
 	case MapTask:
 		return processMapTask(task, mapf)
+	case ReduceTask:
+		return processReduceTask(task, reducef)
 	default:
 		return nil, errors.New("Unknown task type")
 	}
+}
+
+func processReduceTask(task *Task, reducef func(string, []string) string) (*NotifyTaskDoneArgs, error) {
+	// init intermediate values
+	intermediate := make([]KeyValue, 0)
+	for _, input := range task.Input {
+		content, err := ioutil.ReadFile(input)
+		if err != nil {
+			return nil, err
+		}
+
+		var kv []KeyValue
+		if err := json.Unmarshal(content, &kv); err != nil {
+			return nil, err
+		}
+
+		intermediate = append(intermediate, kv...)
+	}
+
+	// sort by keys
+	sort.Sort(ByKey(intermediate))
+
+	// performe reduce and write to temp file
+	oname := "mr_temp_" + uuid.New().String()
+	ofile, _ := os.Create(oname)
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+
+	// close file
+	ofile.Close()
+
+	reply := &NotifyTaskDoneArgs{
+		Output: []string{oname},
+		Task:   *task,
+	}
+	return reply, nil
 }
 
 func processMapTask(task *Task, mapf func(string, string) []KeyValue) (*NotifyTaskDoneArgs, error) {
@@ -119,7 +183,7 @@ func processMapTask(task *Task, mapf func(string, string) []KeyValue) (*NotifyTa
 			return nil, err
 		}
 
-		outputPath := fmt.Sprintf("intermediate/mr-%d-%d", task.ID, i)
+		outputPath := fmt.Sprintf("mr-%d-%d", task.ID, i)
 		if err := ioutil.WriteFile(outputPath, str, 0777); err != nil {
 			return nil, err
 		}
